@@ -1,4 +1,4 @@
-const CACHE_NAME = 'asbury-parking-v1';
+const CACHE_NAME = 'asbury-parking-v2';
 const FILES_TO_CACHE = ['./index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -17,8 +17,16 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Network-first: always try to fetch the latest version. Only fall back to
+// the cached copy if the network request fails (e.g. no signal at the fair).
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((response) => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
