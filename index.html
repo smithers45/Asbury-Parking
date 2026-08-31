@@ -801,8 +801,9 @@ function renderTotalsPage(){
   const expenses = adjustments.filter(a => a.type === 'expense');
   const depositTotal = deposits.reduce((s,a)=> s+a.amount, 0);
   const expenseTotal = expenses.reduce((s,a)=> s+a.amount, 0);
+  const digitalTotal = methodTotals.cashapp + methodTotals.venmo;
   const netIncome = grossTotal - expenseTotal;
-  const cashOnHand = netIncome - depositTotal;
+  const cashOnHand = netIncome - depositTotal - digitalTotal;
 
   const main = document.getElementById('totalsMain');
   main.innerHTML = `
@@ -833,6 +834,7 @@ function renderTotalsPage(){
     <div class="net-card cash-card">
       <div class="net-row"><span>Net income</span><span>${money(netIncome)}</span></div>
       <div class="net-row"><span>– Bank deposits</span><span>-${money(depositTotal)}</span></div>
+      <div class="net-row"><span>– Digital receipts (Cash App + Venmo)</span><span>-${money(digitalTotal)}</span></div>
       <div class="net-row net-total"><span>Cash on hand</span><span>${money(cashOnHand)}</span></div>
     </div>
   `;
