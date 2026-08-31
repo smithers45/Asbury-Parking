@@ -68,7 +68,9 @@
     background: var(--asphalt-soft); color: var(--chalk); border:none; width:34px; height:34px; border-radius:8px;
     font-size:1.1rem; display:flex; align-items:center; justify-content:center;
   }
-  .date-label{ font-size:0.92rem; font-weight:600; min-width:118px; text-align:center; }
+  .date-label{ display:flex; flex-direction:column; align-items:center; min-width:128px; }
+  .date-day{ font-family:'Barlow Condensed'; font-weight:700; font-size:1.05rem; line-height:1.15; }
+  .date-sub{ font-size:0.66rem; color:#B9B4A4; line-height:1.2; }
   .today-total{ text-align:right; }
   .today-total .amt{ font-family:'Barlow Condensed'; font-size:1.9rem; font-weight:700; line-height:1; color: var(--line-yellow); }
   .today-total .lbl{ font-size:0.68rem; color:#B9B4A4; text-transform:none; }
@@ -175,6 +177,39 @@
   .method-cashapp{ background: var(--cashapp-soft); color: var(--cashapp-blue); }
   .method-venmo{ background: var(--venmo-soft); color: var(--venmo-blue); }
   .log-del{ background:none; border:none; color:var(--text-dim); font-size:1.1rem; padding:4px 6px; }
+  .log-item{ cursor:pointer; }
+
+  .grand-total-btn{
+    width:100%; padding:15px 0; margin-top:8px; border:none; border-radius:12px;
+    background: var(--asphalt); color: var(--chalk); font-weight:700; font-size:0.95rem;
+  }
+
+  .delete-entry-btn{
+    width:100%; padding:10px 0; border:none; background:none; color:#B3261E; font-size:0.85rem; font-weight:600; margin-top:2px;
+  }
+
+  .adj-add-btn{
+    width:100%; padding:11px 0; border:2px dashed var(--hairline); border-radius:10px;
+    background:none; color:var(--text-dim); font-weight:600; font-size:0.85rem; margin-bottom:18px;
+  }
+
+  .net-card{ background: var(--pine); color:white; border-radius:14px; padding:16px; margin:8px 0 24px; }
+  .net-card.cash-card{ background: var(--asphalt); }
+  .net-row{ display:flex; justify-content:space-between; padding:5px 0; font-size:0.88rem; }
+  .net-row.net-total{ border-top:1px solid rgba(255,255,255,0.3); margin-top:8px; padding-top:10px; font-weight:700; font-size:1.15rem; font-family:'Barlow Condensed'; }
+
+  .totals-page{
+    position:fixed; inset:0; background:var(--putty); z-index:40;
+    transform: translateX(100%); transition: transform 0.22s ease; overflow-y:auto;
+  }
+  .totals-page.open{ transform: translateX(0); }
+  .totals-header{
+    position:sticky; top:0; background:var(--asphalt); color:var(--chalk); padding:16px;
+    display:flex; align-items:center; justify-content:space-between; border-bottom:4px solid var(--line-yellow); z-index:2;
+  }
+  .totals-header button{ background:none; border:none; color:var(--chalk); font-size:0.92rem; font-weight:600; padding:4px; }
+  .totals-title{ font-family:'Barlow Condensed'; font-weight:700; font-size:1.2rem; }
+  .totals-main{ padding:16px; max-width:620px; margin:0 auto; }
 
   /* Modal */
   .overlay{
@@ -249,7 +284,10 @@
   <div class="date-row">
     <div class="date-nav">
       <button id="prevDay">‹</button>
-      <span class="date-label" id="dateLabel">—</span>
+      <span class="date-label">
+        <span class="date-day" id="dateDay">—</span>
+        <span class="date-sub" id="dateSub"></span>
+      </span>
       <button id="nextDay">›</button>
     </div>
     <div class="today-total">
@@ -297,7 +335,40 @@
 
   <div class="section-title">Today's Log</div>
   <div id="logList"></div>
+
+  <button class="grand-total-btn" id="grandTotalBtn">View Grand Total →</button>
 </main>
+
+<div class="totals-page" id="totalsPage">
+  <div class="totals-header">
+    <button id="totalsBack">‹ Back</button>
+    <span class="totals-title">Grand Total</span>
+    <span style="width:44px;"></span>
+  </div>
+  <div class="totals-main" id="totalsMain"></div>
+</div>
+
+<div class="overlay" id="adjOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="adjSheetTitle">Add Deposit</div>
+
+    <div class="field-label">Amount</div>
+    <div class="custom-wrap">
+      <input type="number" inputmode="decimal" class="custom-input" id="adjAmt" placeholder="$ amount">
+    </div>
+
+    <div class="field-label">Date</div>
+    <input type="date" class="time-input" id="adjDate">
+
+    <div class="field-label">Note (optional)</div>
+    <input type="text" class="time-input" id="adjNote" placeholder="e.g. Wells Fargo branch">
+
+    <button class="log-btn" id="adjSaveBtn">Save</button>
+    <button class="delete-entry-btn" id="adjDeleteBtn" style="display:none;">Delete this entry</button>
+    <button class="cancel-btn" id="adjCancelBtn">Cancel</button>
+  </div>
+</div>
 
 <div class="overlay" id="overlay">
   <div class="sheet">
@@ -327,6 +398,7 @@
     <input type="time" class="time-input" id="timeInput">
 
     <button class="log-btn" id="logBtn">Log payment</button>
+    <button class="delete-entry-btn" id="deleteEntryBtn" style="display:none;">Delete this entry</button>
     <button class="cancel-btn" id="cancelBtn">Cancel</button>
   </div>
 </div>
@@ -377,21 +449,37 @@ const HOUSES = {
   }
 };
 
+const FAIR_START = new Date(2026, 7, 27); // Aug 27, 2026
+const FAIR_END = new Date(2026, 8, 7);    // Sep 7, 2026 (Labor Day)
+
 let currentDate = new Date();
 let dayData = []; // transactions for the visible day
 let activeSpot = null; // {house, spotId}
 let selectedAmt = 40;
 let selectedMethod = 'cash';
+let editingId = null; // id of the log entry currently being edited, or null for a new entry
+let adjEditingId = null;
+let adjType = 'deposit';
 
 function dateKey(d){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
-function dateLabel(d){
+function fairDayNumber(d){
+  const start = new Date(FAIR_START.getFullYear(), FAIR_START.getMonth(), FAIR_START.getDate());
+  const cur = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((cur - start) / 86400000) + 1;
+}
+function fairDayLabel(d){
+  const n = fairDayNumber(d);
+  if(n >= 1 && n <= 12) return `Day ${n}`;
+  return n < 1 ? 'Pre-Fair' : 'Post-Fair';
+}
+function dateSubLabel(d){
   const today = new Date();
   const isToday = dateKey(d) === dateKey(today);
   const opts = { weekday:'short', month:'short', day:'numeric' };
-  return (isToday ? 'Today · ' : '') + d.toLocaleDateString('en-US', opts);
+  return d.toLocaleDateString('en-US', opts) + (isToday ? ' · Today' : '');
 }
 function money(n){ return '$' + Math.round(n).toLocaleString(); }
 function timeStrToLabel(t){
@@ -466,7 +554,8 @@ function buildDiagrams(){
 }
 
 function render(){
-  document.getElementById('dateLabel').textContent = dateLabel(currentDate);
+  document.getElementById('dateDay').textContent = fairDayLabel(currentDate);
+  document.getElementById('dateSub').textContent = dateSubLabel(currentDate);
 
   const houseTotals = { '1367':0, '1372':0 };
   const spotCounts = {};
@@ -514,7 +603,7 @@ function render(){
     list.innerHTML = '<div class="log-empty">No spots logged yet today.</div>';
     return;
   }
-  const sorted = [...dayData].sort((a,b)=> b.time.localeCompare(a.time));
+  const sorted = [...dayData].sort((a,b)=> a.time.localeCompare(b.time));
   list.innerHTML = '';
   for(const tx of sorted){
     const spot = spotById(tx.house, tx.spot);
@@ -532,7 +621,11 @@ function render(){
       </div>
       <button class="log-del" data-id="${tx.id}" title="Delete">✕</button>
     `;
-    row.querySelector('.log-del').addEventListener('click', ()=> deleteTx(tx.id));
+    row.querySelector('.log-del').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      deleteTx(tx.id);
+    });
+    row.addEventListener('click', ()=> openSheet(tx.house, tx.spot, tx));
     list.appendChild(row);
   }
 }
@@ -544,16 +637,26 @@ async function deleteTx(id){
   showToast('Entry removed');
 }
 
-function openSheet(houseId, spotId){
+function openSheet(houseId, spotId, existingTx=null){
   activeSpot = { house: houseId, spot: spotId };
-  selectedAmt = 40;
-  selectedMethod = 'cash';
+  editingId = existingTx ? existingTx.id : null;
   const spot = spotById(houseId, spotId);
+
+  if(existingTx){
+    selectedAmt = [40,30,20].includes(existingTx.amount) ? existingTx.amount : 'custom';
+    selectedMethod = existingTx.method;
+  } else {
+    selectedAmt = 40;
+    selectedMethod = 'cash';
+  }
+
   document.getElementById('sheetTitle').textContent = `${HOUSES[houseId].name} — ${spot.label}`;
   document.getElementById('sheetSub').textContent = spot.full;
-  document.getElementById('customWrap').style.display = 'none';
-  document.getElementById('customAmt').value = '';
-  document.getElementById('timeInput').value = nowTimeStr();
+  document.getElementById('customWrap').style.display = selectedAmt === 'custom' ? 'block' : 'none';
+  document.getElementById('customAmt').value = selectedAmt === 'custom' ? existingTx.amount : '';
+  document.getElementById('timeInput').value = existingTx ? existingTx.time : nowTimeStr();
+  document.getElementById('logBtn').textContent = existingTx ? 'Save changes' : 'Log payment';
+  document.getElementById('deleteEntryBtn').style.display = existingTx ? 'block' : 'none';
   updateAmtButtons();
   updateMethodButtons();
   document.getElementById('overlay').classList.add('open');
@@ -562,6 +665,7 @@ function openSheet(houseId, spotId){
 function closeSheet(){
   document.getElementById('overlay').classList.remove('open');
   activeSpot = null;
+  editingId = null;
 }
 
 function updateAmtButtons(){
@@ -610,24 +714,226 @@ document.getElementById('logBtn').addEventListener('click', async ()=>{
   }
   const time = document.getElementById('timeInput').value || nowTimeStr();
   const spot = spotById(activeSpot.house, activeSpot.spot);
-  const tx = {
-    id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
-    house: activeSpot.house,
-    spot: activeSpot.spot,
-    amount: amount,
-    method: selectedMethod,
-    time: time
-  };
-  dayData.push(tx);
-  await saveDay();
-  render();
+
+  if(editingId){
+    const idx = dayData.findIndex(t => t.id === editingId);
+    if(idx > -1){
+      dayData[idx] = { ...dayData[idx], amount, method: selectedMethod, time };
+    }
+    await saveDay();
+    render();
+    closeSheet();
+    showToast(`Updated — ${spot.label}`);
+  } else {
+    const tx = {
+      id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
+      house: activeSpot.house,
+      spot: activeSpot.spot,
+      amount: amount,
+      method: selectedMethod,
+      time: time
+    };
+    dayData.push(tx);
+    await saveDay();
+    render();
+    closeSheet();
+    showToast(`Logged $${amount} — ${spot.label}`);
+  }
+});
+
+document.getElementById('deleteEntryBtn').addEventListener('click', async ()=>{
+  if(!editingId) return;
+  await deleteTx(editingId);
   closeSheet();
-  showToast(`Logged $${amount} — ${spot.label}`);
 });
 
 document.getElementById('cancelBtn').addEventListener('click', closeSheet);
 document.getElementById('overlay').addEventListener('click', (e)=>{
   if(e.target.id === 'overlay') closeSheet();
+});
+
+/* ---------- Grand Total / deposits & expenses ---------- */
+
+function getAllDayKeys(){
+  const keys = [];
+  for(let i=0; i<localStorage.length; i++){
+    const k = localStorage.key(i);
+    if(k && k.startsWith('day:')) keys.push(k);
+  }
+  return keys;
+}
+
+function computeGrandTotals(){
+  const houseTotals = { '1367':0, '1372':0 };
+  const methodTotals = { cash:0, cashapp:0, venmo:0 };
+  let grossTotal = 0, carCount = 0;
+  for(const k of getAllDayKeys()){
+    let arr = [];
+    try{ arr = JSON.parse(localStorage.getItem(k)) || []; }catch(e){ arr = []; }
+    for(const tx of arr){
+      houseTotals[tx.house] = (houseTotals[tx.house]||0) + tx.amount;
+      methodTotals[tx.method] = (methodTotals[tx.method]||0) + tx.amount;
+      grossTotal += tx.amount;
+      carCount++;
+    }
+  }
+  return { houseTotals, methodTotals, grossTotal, carCount };
+}
+
+function loadAdjustments(){
+  try{
+    const raw = localStorage.getItem('adjustments');
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+function saveAdjustments(list){
+  try{
+    localStorage.setItem('adjustments', JSON.stringify(list));
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
+function renderTotalsPage(){
+  const { houseTotals, methodTotals, grossTotal, carCount } = computeGrandTotals();
+  const adjustments = loadAdjustments();
+  const deposits = adjustments.filter(a => a.type === 'deposit');
+  const expenses = adjustments.filter(a => a.type === 'expense');
+  const depositTotal = deposits.reduce((s,a)=> s+a.amount, 0);
+  const expenseTotal = expenses.reduce((s,a)=> s+a.amount, 0);
+  const netIncome = grossTotal - expenseTotal;
+  const cashOnHand = netIncome - depositTotal;
+
+  const main = document.getElementById('totalsMain');
+  main.innerHTML = `
+    <div class="section-title" style="margin-top:0;">Fair-Wide Totals</div>
+    <div class="summary-card">
+      <div class="summary-row"><span>Gross Revenue (${carCount} car${carCount===1?'':'s'})</span><span class="v">${money(grossTotal)}</span></div>
+      <div class="summary-row"><span>1367 Asbury</span><span class="v">${money(houseTotals['1367'])}</span></div>
+      <div class="summary-row"><span>1372 Asbury</span><span class="v">${money(houseTotals['1372'])}</span></div>
+      <div class="summary-row"><span><span class="pay-pill pill-cash"></span>Cash</span><span class="v">${money(methodTotals.cash)}</span></div>
+      <div class="summary-row"><span><span class="pay-pill pill-cashapp"></span>Cash App</span><span class="v">${money(methodTotals.cashapp)}</span></div>
+      <div class="summary-row"><span><span class="pay-pill pill-venmo"></span>Venmo</span><span class="v">${money(methodTotals.venmo)}</span></div>
+    </div>
+
+    <div class="section-title">Bank Deposits</div>
+    <div id="depositsList"></div>
+    <button class="adj-add-btn" data-type="deposit">+ Add deposit</button>
+
+    <div class="section-title">Fair Expenses</div>
+    <div id="expensesList"></div>
+    <button class="adj-add-btn" data-type="expense">+ Add expense</button>
+
+    <div class="net-card">
+      <div class="net-row"><span>Gross revenue</span><span>${money(grossTotal)}</span></div>
+      <div class="net-row"><span>– Fair expenses</span><span>-${money(expenseTotal)}</span></div>
+      <div class="net-row net-total"><span>Net income</span><span>${money(netIncome)}</span></div>
+    </div>
+
+    <div class="net-card cash-card">
+      <div class="net-row"><span>Net income</span><span>${money(netIncome)}</span></div>
+      <div class="net-row"><span>– Bank deposits</span><span>-${money(depositTotal)}</span></div>
+      <div class="net-row net-total"><span>Cash on hand</span><span>${money(cashOnHand)}</span></div>
+    </div>
+  `;
+
+  populateAdjList('depositsList', deposits);
+  populateAdjList('expensesList', expenses);
+
+  main.querySelectorAll('.adj-add-btn').forEach(b=>{
+    b.addEventListener('click', ()=> openAdjSheet(b.dataset.type));
+  });
+}
+
+function populateAdjList(containerId, items){
+  const el = document.getElementById(containerId);
+  if(items.length === 0){
+    el.innerHTML = '<div class="log-empty">None logged yet.</div>';
+    return;
+  }
+  const sorted = [...items].sort((a,b)=> a.date.localeCompare(b.date));
+  el.innerHTML = '';
+  for(const a of sorted){
+    const row = document.createElement('div');
+    row.className = 'log-item';
+    row.innerHTML = `
+      <div class="log-mid">
+        <div class="log-house">${a.date}</div>
+        <div class="log-spot">${a.note ? a.note : (a.type==='deposit' ? 'Bank deposit' : 'Fair expense')}</div>
+      </div>
+      <div class="log-amt">${money(a.amount)}</div>
+      <button class="log-del" data-id="${a.id}" title="Delete">✕</button>
+    `;
+    row.querySelector('.log-del').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      deleteAdjustment(a.id);
+    });
+    row.addEventListener('click', ()=> openAdjSheet(a.type, a));
+    el.appendChild(row);
+  }
+}
+
+function deleteAdjustment(id){
+  let list = loadAdjustments();
+  list = list.filter(a => a.id !== id);
+  saveAdjustments(list);
+  renderTotalsPage();
+  showToast('Entry removed');
+}
+
+function openAdjSheet(type, existing=null){
+  adjType = type;
+  adjEditingId = existing ? existing.id : null;
+  document.getElementById('adjSheetTitle').textContent = existing
+    ? `Edit ${type==='deposit' ? 'Deposit' : 'Expense'}`
+    : `Add ${type==='deposit' ? 'Deposit' : 'Expense'}`;
+  document.getElementById('adjAmt').value = existing ? existing.amount : '';
+  document.getElementById('adjDate').value = existing ? existing.date : dateKey(new Date());
+  document.getElementById('adjNote').value = existing ? (existing.note || '') : '';
+  document.getElementById('adjDeleteBtn').style.display = existing ? 'block' : 'none';
+  document.getElementById('adjOverlay').classList.add('open');
+}
+function closeAdjSheet(){
+  document.getElementById('adjOverlay').classList.remove('open');
+  adjEditingId = null;
+}
+
+document.getElementById('adjSaveBtn').addEventListener('click', ()=>{
+  const amount = parseFloat(document.getElementById('adjAmt').value);
+  if(!amount || amount <= 0){
+    showToast('Enter a valid amount');
+    return;
+  }
+  const date = document.getElementById('adjDate').value || dateKey(new Date());
+  const note = document.getElementById('adjNote').value.trim();
+  let list = loadAdjustments();
+  if(adjEditingId){
+    const idx = list.findIndex(a => a.id === adjEditingId);
+    if(idx > -1) list[idx] = { ...list[idx], amount, date, note };
+  } else {
+    list.push({ id: Date.now()+'-'+Math.random().toString(36).slice(2,7), type: adjType, amount, date, note });
+  }
+  saveAdjustments(list);
+  closeAdjSheet();
+  renderTotalsPage();
+  showToast('Saved');
+});
+document.getElementById('adjDeleteBtn').addEventListener('click', ()=>{
+  if(!adjEditingId) return;
+  deleteAdjustment(adjEditingId);
+  closeAdjSheet();
+});
+document.getElementById('adjCancelBtn').addEventListener('click', closeAdjSheet);
+document.getElementById('adjOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'adjOverlay') closeAdjSheet();
+});
+
+document.getElementById('grandTotalBtn').addEventListener('click', ()=>{
+  renderTotalsPage();
+  document.getElementById('totalsPage').classList.add('open');
+});
+document.getElementById('totalsBack').addEventListener('click', ()=>{
+  document.getElementById('totalsPage').classList.remove('open');
 });
 
 document.getElementById('prevDay').addEventListener('click', ()=>{
