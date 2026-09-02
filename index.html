@@ -12,6 +12,9 @@
 <title>Asbury St Parking</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <style>
   :root{
     --asphalt: #23262B;
@@ -55,11 +58,29 @@
     border-bottom: 4px solid var(--line-yellow);
   }
   .brand{
-    display:flex; align-items:baseline; gap:8px; margin-bottom:12px;
+    display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:12px;
   }
   .brand-mark{
     font-family:'Barlow Condensed'; font-weight:700; font-size:1.55rem; letter-spacing:0.01em;
   }
+  .sign-out-btn{
+    background:none; border:none; color:#B9B4A4; font-size:0.7rem; text-decoration:underline; padding:2px;
+  }
+
+  .auth-page{
+    position:fixed; inset:0; background: var(--asphalt); z-index:100;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+    opacity:0; pointer-events:none; transition: opacity 0.15s ease;
+  }
+  .auth-page.open{ opacity:1; pointer-events:auto; }
+  .auth-card{
+    background: var(--chalk); border-radius:16px; padding:26px 22px; width:100%; max-width:340px;
+    border-top: 4px solid var(--line-yellow);
+  }
+  .auth-title{ font-family:'Barlow Condensed'; font-weight:700; font-size:1.4rem; margin-bottom:4px; }
+  .auth-sub{ font-size:0.82rem; color:var(--text-dim); margin-bottom:18px; }
+  .auth-error{ color:#B3261E; font-size:0.8rem; margin-top:10px; text-align:center; }
+
   .date-row{
     display:flex; align-items:center; justify-content:space-between; gap:8px;
   }
@@ -211,6 +232,25 @@
   .totals-title{ font-family:'Barlow Condensed'; font-weight:700; font-size:1.2rem; }
   .totals-main{ padding:16px; max-width:620px; margin:0 auto; }
 
+  .stats-sub{ font-size:0.72rem; font-weight:500; color:var(--text-dim); text-transform:none; letter-spacing:0; }
+  .stats-house-title{
+    font-family:'Barlow Condensed'; font-weight:600; font-size:0.88rem; color:var(--text-dim);
+    margin: 14px 0 6px 2px;
+  }
+  .stats-table-wrap{
+    background: var(--chalk); border:1px solid var(--hairline); border-radius:12px;
+    overflow:hidden;
+  }
+  .stats-table{ width:100%; border-collapse:collapse; font-size:0.74rem; }
+  .stats-table th{
+    background: var(--asphalt); color: var(--chalk); font-family:'Barlow Condensed'; font-weight:600;
+    font-size:0.68rem; text-transform:uppercase; letter-spacing:0.03em; padding:8px 6px; text-align:left;
+  }
+  .stats-table th:not(:first-child), .stats-table td:not(:first-child){ text-align:center; }
+  .stats-table td{ padding:8px 6px; border-top:1px solid var(--hairline); }
+  .stats-table td:first-child{ font-weight:600; }
+  .stats-table tbody tr:nth-child(even){ background: var(--putty); }
+
   /* Modal */
   .overlay{
     position:fixed; inset:0; background:rgba(20,20,18,0.5); z-index:50;
@@ -277,9 +317,20 @@
 </head>
 <body>
 
+<div class="auth-page open" id="authPage">
+  <div class="auth-card">
+    <div class="auth-title">Asbury St Parking</div>
+    <div class="auth-sub">Enter the password to continue</div>
+    <input type="password" id="authPassword" class="custom-input" placeholder="Password" autocomplete="current-password" style="margin-bottom:14px;">
+    <button class="log-btn" id="authSubmit">Unlock</button>
+    <div class="auth-error" id="authError" style="display:none;"></div>
+  </div>
+</div>
+
 <header>
   <div class="brand">
     <span class="brand-mark">Asbury St Parking</span>
+    <button id="signOutBtn" class="sign-out-btn">Sign out</button>
   </div>
   <div class="date-row">
     <div class="date-nav">
@@ -406,6 +457,27 @@
 <div class="toast" id="toast"></div>
 
 <script>
+/* =========================================================================
+   SHARED CLOUD STORAGE (Firebase Realtime Database)
+   Fill in the config below with your own free Firebase project so that
+   you and your wife both read/write the same data. See the setup
+   instructions that came with this file for how to get these values.
+   ========================================================================= */
+const firebaseConfig = {
+  apiKey: "PASTE_YOUR_API_KEY_HERE",
+  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://PASTE_YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "PASTE_YOUR_PROJECT"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const auth = firebase.auth();
+
+/* The app is protected by a single shared password. This email is just a
+   fixed account identifier for Firebase Auth — it isn't secret, only the
+   password is. See SETUP-SHARED-DATA.md for how to create this account. */
+const APP_LOGIN_EMAIL = "family@asbury-parking.app";
+
 /* Coordinate system per house diagram: x/y in percent, y=0 is the back of the
    property, y=100 is the street (front). Features are decorative context;
    spots are the tappable markers. */
@@ -497,10 +569,10 @@ function spotById(houseId, spotId){
 }
 
 async function loadDay(){
-  const key = 'day:' + dateKey(currentDate);
+  const key = dateKey(currentDate);
   try{
-    const raw = localStorage.getItem(key);
-    dayData = raw ? JSON.parse(raw) : [];
+    const snap = await db.ref('days/' + key).get();
+    dayData = snap.exists() ? Object.values(snap.val()) : [];
   }catch(e){
     dayData = [];
   }
@@ -508,11 +580,13 @@ async function loadDay(){
 }
 
 async function saveDay(){
-  const key = 'day:' + dateKey(currentDate);
+  const key = dateKey(currentDate);
   try{
-    localStorage.setItem(key, JSON.stringify(dayData));
+    const obj = {};
+    dayData.forEach(tx => { obj[tx.id] = tx; });
+    await db.ref('days/' + key).set(obj);
   }catch(e){
-    showToast('Could not save — try again');
+    showToast('Could not save — check your connection');
   }
 }
 
@@ -752,25 +826,30 @@ document.getElementById('overlay').addEventListener('click', (e)=>{
   if(e.target.id === 'overlay') closeSheet();
 });
 
-/* ---------- Grand Total / deposits & expenses ---------- */
+/* ---------- Grand Total / deposits & expenses / spot stats ---------- */
 
-function getAllDayKeys(){
-  const keys = [];
-  for(let i=0; i<localStorage.length; i++){
-    const k = localStorage.key(i);
-    if(k && k.startsWith('day:')) keys.push(k);
+async function fetchAllDays(){
+  // Returns { 'YYYY-MM-DD': [tx, tx, ...], ... }
+  try{
+    const snap = await db.ref('days').get();
+    if(!snap.exists()) return {};
+    const raw = snap.val();
+    const out = {};
+    for(const dateK in raw){
+      out[dateK] = Object.values(raw[dateK]);
+    }
+    return out;
+  }catch(e){
+    return {};
   }
-  return keys;
 }
 
-function computeGrandTotals(){
+async function computeGrandTotals(allDays){
   const houseTotals = { '1367':0, '1372':0 };
   const methodTotals = { cash:0, cashapp:0, venmo:0 };
   let grossTotal = 0, carCount = 0;
-  for(const k of getAllDayKeys()){
-    let arr = [];
-    try{ arr = JSON.parse(localStorage.getItem(k)) || []; }catch(e){ arr = []; }
-    for(const tx of arr){
+  for(const dateK in allDays){
+    for(const tx of allDays[dateK]){
       houseTotals[tx.house] = (houseTotals[tx.house]||0) + tx.amount;
       methodTotals[tx.method] = (methodTotals[tx.method]||0) + tx.amount;
       grossTotal += tx.amount;
@@ -780,23 +859,78 @@ function computeGrandTotals(){
   return { houseTotals, methodTotals, grossTotal, carCount };
 }
 
-function loadAdjustments(){
+function timeDiffMinutes(t1, t2){
+  const [h1,m1] = t1.split(':').map(Number);
+  const [h2,m2] = t2.split(':').map(Number);
+  return (h2*60+m2) - (h1*60+m1);
+}
+function formatMinutes(mins){
+  if(mins === null) return '—';
+  const h = Math.floor(mins/60), m = Math.round(mins%60);
+  if(h===0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
+function computeSpotStats(allDays){
+  const dayKeys = Object.keys(allDays);
+  const numDays = dayKeys.length;
+
+  const stats = {};
+  for(const houseId of Object.keys(HOUSES)){
+    for(const s of HOUSES[houseId].spots){
+      stats[houseId+'-'+s.id] = { house:houseId, label:s.label, count:0, perDayCounts:{}, gaps:[] };
+    }
+  }
+
+  for(const dateK of dayKeys){
+    const bySpot = {};
+    for(const tx of allDays[dateK]){
+      const sk = tx.house + '-' + tx.spot;
+      if(!stats[sk]) continue;
+      stats[sk].count++;
+      stats[sk].perDayCounts[dateK] = (stats[sk].perDayCounts[dateK]||0) + 1;
+      (bySpot[sk] = bySpot[sk] || []).push(tx.time);
+    }
+    for(const sk in bySpot){
+      const times = bySpot[sk].slice().sort();
+      for(let i=1; i<times.length; i++){
+        const gap = timeDiffMinutes(times[i-1], times[i]);
+        if(gap >= 0) stats[sk].gaps.push(gap);
+      }
+    }
+  }
+
+  const result = { '1367':[], '1372':[] };
+  for(const sk in stats){
+    const st = stats[sk];
+    const maxDay = Object.values(st.perDayCounts).reduce((m,v)=>Math.max(m,v),0);
+    const avgPerDay = numDays>0 ? st.count/numDays : 0;
+    const avgGap = st.gaps.length>0 ? st.gaps.reduce((a,b)=>a+b,0)/st.gaps.length : null;
+    result[st.house].push({ label: st.label, count: st.count, avgPerDay, maxDay, avgGap });
+  }
+  return { byHouse: result, numDays };
+}
+
+async function loadAdjustments(){
   try{
-    const raw = localStorage.getItem('adjustments');
-    return raw ? JSON.parse(raw) : [];
+    const snap = await db.ref('adjustments').get();
+    return snap.exists() ? Object.values(snap.val()) : [];
   }catch(e){ return []; }
 }
-function saveAdjustments(list){
+async function saveAdjustments(list){
   try{
-    localStorage.setItem('adjustments', JSON.stringify(list));
+    const obj = {};
+    list.forEach(a => { obj[a.id] = a; });
+    await db.ref('adjustments').set(obj);
   }catch(e){
-    showToast('Could not save — try again');
+    showToast('Could not save — check your connection');
   }
 }
 
-function renderTotalsPage(){
-  const { houseTotals, methodTotals, grossTotal, carCount } = computeGrandTotals();
-  const adjustments = loadAdjustments();
+async function renderTotalsPage(){
+  const allDays = await fetchAllDays();
+  const { houseTotals, methodTotals, grossTotal, carCount } = await computeGrandTotals(allDays);
+  const adjustments = await loadAdjustments();
   const deposits = adjustments.filter(a => a.type === 'deposit');
   const expenses = adjustments.filter(a => a.type === 'expense');
   const depositTotal = deposits.reduce((s,a)=> s+a.amount, 0);
@@ -804,6 +938,17 @@ function renderTotalsPage(){
   const digitalTotal = methodTotals.cashapp + methodTotals.venmo;
   const netIncome = grossTotal - expenseTotal;
   const cashOnHand = netIncome - depositTotal - digitalTotal;
+  const { byHouse, numDays } = computeSpotStats(allDays);
+
+  const spotRows = (houseId) => byHouse[houseId].map(s => `
+    <tr>
+      <td>${s.label}</td>
+      <td>${s.count}</td>
+      <td>${s.avgPerDay.toFixed(1)}</td>
+      <td>${s.maxDay}</td>
+      <td>${formatMinutes(s.avgGap)}</td>
+    </tr>
+  `).join('');
 
   const main = document.getElementById('totalsMain');
   main.innerHTML = `
@@ -836,6 +981,24 @@ function renderTotalsPage(){
       <div class="net-row"><span>– Bank deposits</span><span>-${money(depositTotal)}</span></div>
       <div class="net-row"><span>– Digital receipts (Cash App + Venmo)</span><span>-${money(digitalTotal)}</span></div>
       <div class="net-row net-total"><span>Cash on hand</span><span>${money(cashOnHand)}</span></div>
+    </div>
+
+    <div class="section-title">Spot Performance <span class="stats-sub">(${numDays} day${numDays===1?'':'s'} logged)</span></div>
+
+    <div class="stats-house-title">1367 Asbury</div>
+    <div class="stats-table-wrap">
+      <table class="stats-table">
+        <thead><tr><th>Spot</th><th>Times</th><th>Avg/Day</th><th>Max/Day</th><th>Avg Gap</th></tr></thead>
+        <tbody>${spotRows('1367')}</tbody>
+      </table>
+    </div>
+
+    <div class="stats-house-title">1372 Asbury</div>
+    <div class="stats-table-wrap" style="margin-bottom:24px;">
+      <table class="stats-table">
+        <thead><tr><th>Spot</th><th>Times</th><th>Avg/Day</th><th>Max/Day</th><th>Avg Gap</th></tr></thead>
+        <tbody>${spotRows('1372')}</tbody>
+      </table>
     </div>
   `;
 
@@ -875,11 +1038,11 @@ function populateAdjList(containerId, items){
   }
 }
 
-function deleteAdjustment(id){
-  let list = loadAdjustments();
+async function deleteAdjustment(id){
+  let list = await loadAdjustments();
   list = list.filter(a => a.id !== id);
-  saveAdjustments(list);
-  renderTotalsPage();
+  await saveAdjustments(list);
+  await renderTotalsPage();
   showToast('Entry removed');
 }
 
@@ -900,7 +1063,7 @@ function closeAdjSheet(){
   adjEditingId = null;
 }
 
-document.getElementById('adjSaveBtn').addEventListener('click', ()=>{
+document.getElementById('adjSaveBtn').addEventListener('click', async ()=>{
   const amount = parseFloat(document.getElementById('adjAmt').value);
   if(!amount || amount <= 0){
     showToast('Enter a valid amount');
@@ -908,21 +1071,21 @@ document.getElementById('adjSaveBtn').addEventListener('click', ()=>{
   }
   const date = document.getElementById('adjDate').value || dateKey(new Date());
   const note = document.getElementById('adjNote').value.trim();
-  let list = loadAdjustments();
+  let list = await loadAdjustments();
   if(adjEditingId){
     const idx = list.findIndex(a => a.id === adjEditingId);
     if(idx > -1) list[idx] = { ...list[idx], amount, date, note };
   } else {
     list.push({ id: Date.now()+'-'+Math.random().toString(36).slice(2,7), type: adjType, amount, date, note });
   }
-  saveAdjustments(list);
+  await saveAdjustments(list);
   closeAdjSheet();
-  renderTotalsPage();
+  await renderTotalsPage();
   showToast('Saved');
 });
-document.getElementById('adjDeleteBtn').addEventListener('click', ()=>{
+document.getElementById('adjDeleteBtn').addEventListener('click', async ()=>{
   if(!adjEditingId) return;
-  deleteAdjustment(adjEditingId);
+  await deleteAdjustment(adjEditingId);
   closeAdjSheet();
 });
 document.getElementById('adjCancelBtn').addEventListener('click', closeAdjSheet);
@@ -930,9 +1093,10 @@ document.getElementById('adjOverlay').addEventListener('click', (e)=>{
   if(e.target.id === 'adjOverlay') closeAdjSheet();
 });
 
-document.getElementById('grandTotalBtn').addEventListener('click', ()=>{
-  renderTotalsPage();
+document.getElementById('grandTotalBtn').addEventListener('click', async ()=>{
+  document.getElementById('totalsMain').innerHTML = '<div class="log-empty">Loading…</div>';
   document.getElementById('totalsPage').classList.add('open');
+  await renderTotalsPage();
 });
 document.getElementById('totalsBack').addEventListener('click', ()=>{
   document.getElementById('totalsPage').classList.remove('open');
@@ -947,8 +1111,98 @@ document.getElementById('nextDay').addEventListener('click', ()=>{
   loadDay();
 });
 
-buildDiagrams();
-loadDay();
+/* ---------- One-time migration: bring existing on-device data into Firebase ---------- */
+async function migrateLocalDataIfNeeded(){
+  if(localStorage.getItem('firebaseMigrated')) return;
+  try{
+    const remoteSnap = await db.ref('days').get();
+    const remoteHasData = remoteSnap.exists();
+
+    if(!remoteHasData){
+      const updates = {};
+      let foundAny = false;
+
+      for(let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.startsWith('day:')){
+          const dateK = k.slice(4);
+          let arr = [];
+          try{ arr = JSON.parse(localStorage.getItem(k)) || []; }catch(e){}
+          if(arr.length){
+            const obj = {};
+            arr.forEach(tx => { obj[tx.id] = tx; });
+            updates['days/' + dateK] = obj;
+            foundAny = true;
+          }
+        }
+      }
+
+      const adjRaw = localStorage.getItem('adjustments');
+      if(adjRaw){
+        try{
+          const adjArr = JSON.parse(adjRaw) || [];
+          if(adjArr.length){
+            const obj = {};
+            adjArr.forEach(a => { obj[a.id] = a; });
+            updates['adjustments'] = obj;
+            foundAny = true;
+          }
+        }catch(e){}
+      }
+
+      if(foundAny){
+        await db.ref().update(updates);
+        showToast('Existing data moved to shared storage');
+      }
+    }
+    localStorage.setItem('firebaseMigrated', '1');
+  }catch(e){
+    // Likely offline or Firebase not configured yet — leave the flag unset
+    // so migration is retried automatically on a future successful load.
+  }
+}
+
+/* ---------- Password gate (Firebase Authentication) ---------- */
+
+let appInitialized = false;
+
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+
+auth.onAuthStateChanged((user)=>{
+  const authPage = document.getElementById('authPage');
+  if(user){
+    authPage.classList.remove('open');
+    if(!appInitialized){
+      appInitialized = true;
+      buildDiagrams();
+      migrateLocalDataIfNeeded().then(loadDay);
+    }
+  } else {
+    authPage.classList.add('open');
+  }
+});
+
+async function attemptLogin(){
+  const pw = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  errEl.style.display = 'none';
+  if(!pw){ return; }
+  try{
+    await auth.signInWithEmailAndPassword(APP_LOGIN_EMAIL, pw);
+    document.getElementById('authPassword').value = '';
+  }catch(e){
+    errEl.textContent = 'Incorrect password. Try again.';
+    errEl.style.display = 'block';
+  }
+}
+
+document.getElementById('authSubmit').addEventListener('click', attemptLogin);
+document.getElementById('authPassword').addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter') attemptLogin();
+});
+document.getElementById('signOutBtn').addEventListener('click', ()=>{
+  auth.signOut();
+});
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
